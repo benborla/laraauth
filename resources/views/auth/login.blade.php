@@ -1,5 +1,6 @@
 @extends('layouts.app')
 
+
 @section('content')
 <div class="container">
     <div class="row justify-content-center">
@@ -38,6 +39,22 @@
                                 @endif
                             </div>
                         </div>
+
+                        @if ($errors->has('validationRequired') && true === (bool) $errors->first('validationRequired'))
+                            <div class="form-group row">
+                                <label for="password" class="col-md-4 col-form-label text-md-right">Verification Code</label>
+
+                                <div class="col-md-6">
+                                    <input id="verificationCode" type="text" class="form-control{{ $errors->has('verificationCode') ? ' is-invalid' : '' }}" name="verificationCode" required>
+
+                                    @if ($errors->has('verificationCode'))
+                                        <span class="invalid-feedback">
+                                        <strong>{{ $errors->first('verificationCode') }}</strong>
+                                    </span>
+                                    @endif
+                                </div>
+                            </div>
+                        @endif
 
                         <div class="form-group row">
                             <div class="col-md-6 offset-md-4">

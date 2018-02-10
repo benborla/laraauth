@@ -112,6 +112,12 @@ return [
     |
     */
 
+    /*
+     * To make this work, execute this on your terminal
+     * $ php artisan vendor:publish --tag=laravel-notifications
+     * $ php artisan vendor:publish --tag=laravel-mail
+     */
+
     'markdown' => [
         'theme' => 'default',
 

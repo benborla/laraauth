@@ -5,6 +5,10 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use Illuminate\Foundation\Auth\AuthenticatesUsers;
 use Illuminate\Http\Request;
+use Jenssegers\Agent\Agent;
+use Illuminate\Validation\ValidationException;
+use Keygen\Keygen;
+
 class LoginController extends Controller
 {
     /*
@@ -39,8 +43,14 @@ class LoginController extends Controller
         $this->middleware('guest')->except('logout');
     }
 
+
     public function login(Request $request)
     {
+        $loginVerification = new \App\LoginVerification();
+        $agent             = new Agent();
+        $device            = $agent->device();
+        $knownDevice       = new \App\UserKnownDevice();
+
         $this->validateLogin($request);
 
         // If the class is using the ThrottlesLogins trait, we can automatically throttle
@@ -52,10 +62,86 @@ class LoginController extends Controller
             return $this->sendLockoutResponse($request);
         }
 
-        // check first if device being used is being recorded
 
         if ($this->attemptLogin($request)) {
-            return $this->sendLoginResponse($request);
+
+            $user           = $this->guard()->user();
+            $userId         = (int) $user->id;
+            $validationCode = (int) $request->input('verificationCode');
+
+
+
+            $checkLogin2fa = $loginVerification::where('user_id', '=', $userId)
+                ->where('security_code', '=', $validationCode)->where('device', $device)->first();
+
+            if($checkLogin2fa) {
+
+                // save the new device
+                $knownDevice->user_id = $userId;
+                $knownDevice->device  = $device;
+                $knownDevice->save();
+
+
+                // delete record
+                $loginVerification::find($checkLogin2fa['id'])->delete();
+
+
+                // verified
+                return $this->sendLoginResponse($request);
+            }
+            else {
+
+                // get the info of the known device (if recorded)
+                $data = $knownDevice::where('user_id', '=', $userId)->where('device', '=', $device)->get()->count();
+
+                // if the device used for logging-in does not exists yet, then we ask for a verification
+                if(!$data)  {
+
+                    // destroy session
+                    $this->guard()->logout();
+                    $request->session()->invalidate();
+
+                    $loginVerificationData = $loginVerification::where('user_id', '=', $userId)
+                        ->where('device', '=', $device)->get()->count();
+
+                    // if no verification code stored yet
+                    $code = Keygen::numeric(6)->generate();
+
+                    if(!$loginVerificationData) {
+
+                        // save new entry for user 2FA
+                        $loginVerification->user_id = $userId;
+                        $loginVerification->device = $device;
+                        $loginVerification->security_code = $code;
+
+                        $loginVerification->save();
+
+                        // notify the user that an email has been sent for the verification code
+
+                        \Mail::send('auth.mail.verify', [
+                            'title' => trans('new_device_login'),
+                            'content' => trans('two_way_auth_message'),
+                            'code'    => $code
+                        ], function ($message)
+                        {
+
+                            $message->from('no-reply@laraauth.com', config('app.name'));
+
+                            $message->to('benborla@icloud.com');
+
+                            $message->subject(trans('auth.new_device_login'));
+
+                        });
+
+                    }
+
+
+                    return $this->sendTwoFactoryAuthRequired($request);
+
+                }
+                else
+                    return $this->sendLoginResponse($request);
+            }
         }
 
         // If the login attempt was unsuccessful we will increment the number of attempts
@@ -65,8 +151,27 @@ class LoginController extends Controller
 
         return $this->sendFailedLoginResponse($request);
 
-        // https://scotch.io/tutorials/a-guide-to-using-eloquent-orm-in-laravel
 
+    }
+
+
+
+    /**
+     * Get the failed login response instance.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Symfony\Component\HttpFoundation\Response
+     *
+     * @throws ValidationException
+     */
+    protected function sendTwoFactoryAuthRequired(Request $request)
+    {
+        return redirect('login')
+            ->withInput($request->only($this->username(), 'remember'))
+            ->withErrors([
+                $this->username() => [trans('auth.two_way_auth')],
+                'validationRequired' => true
+            ]);
     }
 
 

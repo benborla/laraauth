@@ -6,7 +6,8 @@ use App\User;
 use App\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Foundation\Auth\RegistersUsers;
-
+use Illuminate\Http\Request;
+use Jenssegers\Agent\Agent;
 class RegisterController extends Controller
 {
     /*
@@ -68,4 +69,34 @@ class RegisterController extends Controller
             'password' => bcrypt($data['password']),
         ]);
     }
+
+    /**
+     * The user has been registered.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  mixed  $user
+     * @return mixed
+     */
+    protected function registered(Request $request, $user)
+    {
+        $userId = (int) $user->id;
+
+        if(!$userId) {
+            return false;
+        }
+
+        $agent  = new Agent();
+        $device = $agent->device();
+
+        $knownDevice = new \App\UserKnownDevice();
+        $data        = $knownDevice::where('user_id', '=', $userId)->where('device', '=', $device)->get()->count();
+
+        // check if the device and the device stored in the table
+        if(!$data) {
+            $knownDevice->user_id = $userId;
+            $knownDevice->device = $device;
+            $knownDevice->save();
+        }
+    }
+
 }
