@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Support\Facades\Auth;
 class HomeController extends Controller
 {
     /**
@@ -21,7 +22,11 @@ class HomeController extends Controller
      */
     public function index()
     {
-        $usersDevice = \App\UserKnownDevice::all();
+        $userId      = (int) Auth::guard()->user()->id;
+        $usersDevice = \App\UserKnownDevice::where('user_id', '=', $userId)->get();
+
         return view('home', ['devices' => $usersDevice]);
+
+
     }
 }
