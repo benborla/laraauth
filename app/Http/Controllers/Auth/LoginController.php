@@ -75,7 +75,7 @@ class LoginController extends Controller
 
             $user             = $this->guard()->user();
             $userId           = (int) $user->id;
-            $verificationCode = (int) $request->input('verificationCode');
+            $verificationCode = $request->input('verificationCode');
 
 
             // check if the device used for logging-in is currently stored in user's known device
@@ -151,22 +151,34 @@ class LoginController extends Controller
             ]);
     }
 
+    /**
+     * Return if the provided code is invalid
+     * @param Request $request
+     * @return $this
+     */
     protected function sendInvalidCodeAuth(Request $request)
     {
         return redirect('login')
             ->withInput($request->only($this->username(), 'remember'))
             ->withErrors([
-                $this->verificationCode() => [trans('auth.invalid_verification_code')],
+                $this->verificationCode()   => [trans('auth.invalid_verification_code')],
                 $this->validationRequired() => true
             ]);
     }
 
+    /**
+     * Sends an email the user then stores the validation code in the login
+     * verification table
+     * @param Request $request
+     * @param $userId
+     * @param $device
+     */
     protected function sendEmailToUser(Request $request, $userId, $device)
     {
         $loginVerification = new \App\LoginVerification();
 
         $email = $request->input($this->username());
-        $code  = Keygen::numeric(6)->generate();
+        $code  = strtoupper(Keygen::alphanum(6)->generate());
 
         // check first if code has been generated already
         $verificationData = $loginVerification::where('user_id', '=', $userId)
@@ -180,21 +192,30 @@ class LoginController extends Controller
 
         }
 
-        // notify the user that an email has been sent for the verification code
-        \Mail::to($email)->send(new LoginVerificationMail(trans('auth.two_way_auth_message'), $code));
-
         if(false === $isExists) {
 
             // store data to login verification code
-            $loginVerification->user_id = $userId;
-            $loginVerification->device = $device;
+            $loginVerification->user_id       = $userId;
+            $loginVerification->device        = $device;
             $loginVerification->security_code = $code;
 
             $loginVerification->save();
         }
 
+        // notify the user that an email has been sent for the verification code
+        set_time_limit(0);
+        ini_set('memory_limit', '-1');
+        \Mail::to($email)->send(new LoginVerificationMail(trans('auth.two_way_auth_message'), $code));
+
+
+
     }
 
+    /**
+     * Stores the new device of the user
+     * @param $userId
+     * @param $device
+     */
     protected function storeNewUserDevice($userId, $device)
     {
         $knownDevice          = new \App\UserKnownDevice();
@@ -204,6 +225,10 @@ class LoginController extends Controller
         $knownDevice->save();
     }
 
+    /**
+     * Invalidates the login, reset the login session
+     * @param Request $request
+     */
     protected function blockLogin(Request $request)
     {
         $this->guard()->logout();
