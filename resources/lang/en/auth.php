@@ -18,5 +18,6 @@ return [
     'two_way_auth' => 'A new device has been detected, an email has been sent to your email to verify your account',
     'two_way_auth_message' => 'We have detected that you are logging-in into a new device, please verify your login by providing the verification code below: ',
     'new_device_login' => 'New Device Login',
+    'invalid_verification_code' => 'Invalid verification provided'
 
 ];

@@ -8,7 +8,7 @@ use Illuminate\Http\Request;
 use Jenssegers\Agent\Agent;
 use Illuminate\Validation\ValidationException;
 use Keygen\Keygen;
-
+use App\Mail\LoginVerificationMail;
 class LoginController extends Controller
 {
     /*
@@ -44,6 +44,14 @@ class LoginController extends Controller
     }
 
 
+    /**
+     * Overrides the logic of the Laravel's built-in login process
+     * this process, matches the device that the user is using for logging-in
+     * if the device is not yet recorded on user's known devices, then it will send
+     * an email for verification
+     * @param Request $request
+     * @return \Illuminate\Http\Response|\Symfony\Component\HttpFoundation\Response|void
+     */
     public function login(Request $request)
     {
         $loginVerification = new \App\LoginVerification();
@@ -65,83 +73,52 @@ class LoginController extends Controller
 
         if ($this->attemptLogin($request)) {
 
-            $user           = $this->guard()->user();
-            $userId         = (int) $user->id;
-            $validationCode = (int) $request->input('verificationCode');
+            $user             = $this->guard()->user();
+            $userId           = (int) $user->id;
+            $verificationCode = (int) $request->input('verificationCode');
 
 
+            // check if the device used for logging-in is currently stored in user's known device
+            $isKnownDevice = $knownDevice::where('user_id', '=', $userId)->where('device', '=', $device)->get()->count();
 
-            $checkLogin2fa = $loginVerification::where('user_id', '=', $userId)
-                ->where('security_code', '=', $validationCode)->where('device', $device)->first();
+            if(!$isKnownDevice) {
 
-            if($checkLogin2fa) {
+                // check if user provided verification code
+                if($verificationCode) {
+                    // check if the verification code matches to the stored user's login verification code
+                    $isMatch = $loginVerification::where('user_id', '=', $userId)->where('device', '=', $device)->where('security_code', '=', $verificationCode)->first();
 
-                // save the new device
-                $knownDevice->user_id = $userId;
-                $knownDevice->device  = $device;
-                $knownDevice->save();
+                    if($isMatch) {
+                        // store the new device
+                        $this->storeNewUserDevice($userId, $device);
+                        // delete record
+                        $loginVerification::find($isMatch['id'])->delete();
+                        // login user
 
+                        return $this->sendLoginResponse($request);
+                    }
+                    else {
+                        $this->blockLogin($request);
+                        return $this->sendInvalidCodeAuth($request);
+                    }
+                }
+                else {
+                    $this->blockLogin($request);
 
-                // delete record
-                $loginVerification::find($checkLogin2fa['id'])->delete();
+                    // send an email to the user
+                    $this->sendEmailToUser($request, $userId, $device);
 
+                    // then let user know that a verification code is need to complete the login
+                    return $this->sendTwoFactoryAuthRequired($request);
+                }
 
-                // verified
-                return $this->sendLoginResponse($request);
             }
             else {
 
-                // get the info of the known device (if recorded)
-                $data = $knownDevice::where('user_id', '=', $userId)->where('device', '=', $device)->get()->count();
-
-                // if the device used for logging-in does not exists yet, then we ask for a verification
-                if(!$data)  {
-
-                    // destroy session
-                    $this->guard()->logout();
-                    $request->session()->invalidate();
-
-                    $loginVerificationData = $loginVerification::where('user_id', '=', $userId)
-                        ->where('device', '=', $device)->get()->count();
-
-                    // if no verification code stored yet
-                    $code = Keygen::numeric(6)->generate();
-
-                    if(!$loginVerificationData) {
-
-                        // save new entry for user 2FA
-                        $loginVerification->user_id = $userId;
-                        $loginVerification->device = $device;
-                        $loginVerification->security_code = $code;
-
-                        $loginVerification->save();
-
-                        // notify the user that an email has been sent for the verification code
-
-                        \Mail::send('auth.mail.verify', [
-                            'title' => trans('new_device_login'),
-                            'content' => trans('two_way_auth_message'),
-                            'code'    => $code
-                        ], function ($message)
-                        {
-
-                            $message->from('no-reply@laraauth.com', config('app.name'));
-
-                            $message->to('benborla@icloud.com');
-
-                            $message->subject(trans('auth.new_device_login'));
-
-                        });
-
-                    }
-
-
-                    return $this->sendTwoFactoryAuthRequired($request);
-
-                }
-                else
-                    return $this->sendLoginResponse($request);
+                // if it is a known device
+                return $this->sendLoginResponse($request);
             }
+
         }
 
         // If the login attempt was unsuccessful we will increment the number of attempts
@@ -169,10 +146,88 @@ class LoginController extends Controller
         return redirect('login')
             ->withInput($request->only($this->username(), 'remember'))
             ->withErrors([
-                $this->username() => [trans('auth.two_way_auth')],
-                'validationRequired' => true
+                $this->username()           => [trans('auth.two_way_auth')],
+                $this->validationRequired() => true
             ]);
     }
+
+    protected function sendInvalidCodeAuth(Request $request)
+    {
+        return redirect('login')
+            ->withInput($request->only($this->username(), 'remember'))
+            ->withErrors([
+                $this->verificationCode() => [trans('auth.invalid_verification_code')],
+                $this->validationRequired() => true
+            ]);
+    }
+
+    protected function sendEmailToUser(Request $request, $userId, $device)
+    {
+        $loginVerification = new \App\LoginVerification();
+
+        $email = $request->input($this->username());
+        $code  = Keygen::numeric(6)->generate();
+
+        // check first if code has been generated already
+        $verificationData = $loginVerification::where('user_id', '=', $userId)
+            ->where('device', '=', $device)->first();
+        $isExists = false;
+
+        if($verificationData) {
+            $code = $verificationData['security_code'];
+
+            $isExists = true;
+
+        }
+
+        // notify the user that an email has been sent for the verification code
+        \Mail::to($email)->send(new LoginVerificationMail(trans('auth.two_way_auth_message'), $code));
+
+        if(false === $isExists) {
+
+            // store data to login verification code
+            $loginVerification->user_id = $userId;
+            $loginVerification->device = $device;
+            $loginVerification->security_code = $code;
+
+            $loginVerification->save();
+        }
+
+    }
+
+    protected function storeNewUserDevice($userId, $device)
+    {
+        $knownDevice          = new \App\UserKnownDevice();
+        $knownDevice->user_id = $userId;
+        $knownDevice->device  = $device;
+
+        $knownDevice->save();
+    }
+
+    protected function blockLogin(Request $request)
+    {
+        $this->guard()->logout();
+        $request->session()->invalidate();
+    }
+
+    /**
+     * Get the login verificationCode to be used by the controller.
+     * @return string
+     */
+    protected function verificationCode()
+    {
+        return 'verificationCode';
+    }
+
+    /**
+     * Flag if new device is detected
+     * @return string
+     */
+    protected function validationRequired()
+    {
+        return 'validationRequired';
+    }
+
 
 
 }
