@@ -21,7 +21,7 @@ class HomeController extends Controller
      */
     public function index()
     {
-
-        return view('home');
+        $usersDevice = \App\UserKnownDevice::all();
+        return view('home', ['devices' => $usersDevice]);
     }
 }

@@ -14,7 +14,25 @@
                         </div>
                     @endif
 
-                    You are logged in!
+
+                    <h3>@lang('home.home_devices')</h3>
+
+                    <table class="table table-hover">
+                        <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Date Recorded</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                    @foreach($devices as $device)
+                        <tr>
+                            <td>{{ $device['device'] }}</td>
+                            <td>{{ date('M d, Y - H:i:s', strtotime($device['created_at'])) }}</td>
+                        </tr>
+                    @endforeach
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
