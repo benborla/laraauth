@@ -107,6 +107,8 @@ class RegisterController extends Controller
 
         // http://www.lara-auth.local/auth/verify/5jPjg48ago18SodXHHfM
 
+        // generate a link
+
         $verificationTable = new \App\VerifyUserRegistration();
         $verificationData  = $verificationTable::with('user')->where('token', '=', $token)->first();
 
