@@ -17,4 +17,8 @@ Route::get('/', function () {
 
 Auth::routes();
 
+// registration verification
+Route::get('register/verification/{id}', 'Auth\RegisterController@verification')->name('register.verification');
+Route::get('auth/verify/{token}', 'Auth\RegisterController@verifyUser')->name('register.verify_user');
+
 Route::get('/home', 'HomeController@index')->name('home');

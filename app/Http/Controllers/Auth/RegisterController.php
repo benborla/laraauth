@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Foundation\Auth\RegistersUsers;
 use Illuminate\Http\Request;
 use Jenssegers\Agent\Agent;
+use Illuminate\Auth\Events\Registered;
+use Keygen\Keygen;
+use App\Mail\RegistrationVerification;
 class RegisterController extends Controller
 {
     /*
@@ -40,6 +43,79 @@ class RegisterController extends Controller
         $this->middleware('guest');
     }
 
+
+    /**
+     * Handle a registration request for the application.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function register(Request $request)
+    {
+        $this->validator($request->all())->validate();
+
+        event(new Registered($user = $this->create($request->all())));
+
+        // create also an entry for verifying the user
+        if($user) {
+            $userId       = $user['id'];
+            $verifyTable  = new \App\VerifyUserRegistration();
+            $token        = Keygen::alphanum(20)->generate();
+
+            $verifyTable->user_id = (int) $userId;
+            $verifyTable->token   = $token;
+
+            $verifyTable->save();
+        }
+
+
+    }
+
+    public function verification(Request $request, $id)
+    {
+        $userId    = (int) $id;
+        $userTable = new \App\User();
+        $user      = $userTable::find($userId);
+
+        if(!$user->verified) {
+
+            $assumedFirstName  = (int) strpos($user->name, ' ');
+            $name              = ucwords(substr($user->name, 0, $assumedFirstName));
+            $message           = sprintf(trans('register_verification'), $name);
+
+            $verificationTable = new \App\VerifyUserRegistration();
+            $verificationData  = $verificationTable::find($userId)->first();
+
+            if($verificationData) {
+                $token = $verificationData->token;
+            }
+
+            // notify the user that an email has been sent for the verification code
+            set_time_limit(0);
+            ini_set('memory_limit', '-1');
+            \Mail::to($user->email)->send(new RegistrationVerification($message, $token));
+
+            return view('auth.verification');
+        }
+
+        return view('auth.already_verified');;
+
+    }
+
+    public function verifyUser(Request $request, $token)
+    {
+
+        // http://www.lara-auth.local/auth/verify/5jPjg48ago18SodXHHfM
+
+        $verificationTable = new \App\VerifyUserRegistration();
+        $verificationData  = $verificationTable::with('user')->where('token', '=', $token)->first();
+
+
+
+        return $verificationData;
+    }
+
+
     /**
      * Get a validator for an incoming registration request.
      *
@@ -49,8 +125,8 @@ class RegisterController extends Controller
     protected function validator(array $data)
     {
         return Validator::make($data, [
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
+            'name' => 'required|string|max:100',
+            'email' => 'required|string|email|max:100|unique:users',
             'password' => 'required|string|min:6|confirmed',
         ]);
     }
@@ -67,6 +143,7 @@ class RegisterController extends Controller
             'name' => $data['name'],
             'email' => $data['email'],
             'password' => bcrypt($data['password']),
+            'active' => 0
         ]);
     }
 
